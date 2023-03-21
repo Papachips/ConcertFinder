@@ -7,6 +7,7 @@ import calendar
 
 def getMonth():
     month = str(date.today().month + 2)
+    #since we get 2 months ahead, we need to account for edge cases of running the script in November and December and adjust accordingly.
     if(month == '13'):
         month = '01'
     if(month == '14'):
@@ -16,6 +17,7 @@ def getMonth():
     return month
 
 def getYear(month):
+    #we need to set the year ahead if we are running in December since we go 2 months out.
     year = str(date.today().year) if month is not '12' else str(date.today().year + 1)
     return year
 
@@ -31,7 +33,7 @@ def createEmail():
     return message
 
 def createEmailBody():
-    
+    #the best way i could find to embed html and styling into an email body in python
     body = '''<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN" "http://www.w3.org/TR/REC-html40/loose.dtd">
 <html>
 <head>
@@ -70,6 +72,7 @@ def calculateDates():
 
     return today, formatedDate
 
+#connect to a plex account with a music library to get an always up to date and curated list of artists i am interested in
 def plexServer():
     account = MyPlexAccount('PLEX_ACCOUNT_NAME', 'PLEX_PASSWORD')
     plex = account.resource('PLEX_SERVER_NAME').connect()
@@ -134,6 +137,7 @@ body = createEmailBody()
 
 eventCount = 0
 
+#finishing the email body with the table of concerts and closing tags
 body = getConcerts(state='PA', cities=['Millvale', 'Pittsburgh'], genre='rock', body=body, eventCount=eventCount)
 body = getConcerts(state='OH', cities=['Cleveland'], genre='rock', body=body, eventCount=eventCount+1)
 
