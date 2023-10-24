@@ -1,4 +1,4 @@
-from bandsintown import Client
+from requests import get
 from plexapi.myplex import MyPlexAccount
 from datetime import date, datetime
 import smtplib
@@ -7,38 +7,47 @@ import calendar
 import time
 import requests
 import urllib
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+
+clientID = SEATGEEK_CLIENT_ID
+appSecret = SEATGEEK_APP_SECRET
+params = {
+    'client_id': clientID,
+    'client_secret': appSecret,
+}
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID,client_secret=SPOTIFY_CLIENT_SECRET))
 
 def getMonth():
-    month = str(date.today().month + 2)
+    month = date.today().month + 2
     if(month == '13'):
         month = '01'
     if(month == '14'):
         month = '02'
     if(int(month) < 10):
         month = '0' + month
-    return month
+    return int(month)
 
 def getYear(month):
-    year = str(date.today().year) if month !='12' else str(date.today().year + 1)
+    year = date.today().year if month !='12' else date.today().year + 1
     return year
 
 def calculateDates():
-    today = str(date.today().strftime('%Y-%m-%d'))
+    startDate = date.today()
     month = getMonth()
     year = getYear(month)
+    monthEnd = int(calendar.monthrange(int(year), int(month))[1])
+    endDate = date(year, month, monthEnd)
 
-    monthEnd = str(calendar.monthrange(int(year), int(month))[1])
-    formatedDate = year + '-' + month + '-' + monthEnd
-
-    return today, formatedDate
+    return startDate, endDate
 
 def createEmail():
     endMonth = int(getMonth())
     startMonth = int(endMonth-1)
     year = getYear(endMonth)
     message = EmailMessage()
-    to = [EMAIL_ADDRESSES]
-    message['Subject']='Concert Alerts for ' + calendar.month_name[startMonth] + '-' + calendar.month_name[endMonth] + ' ' + year
+    to = EMAIL_LIST
+    message['Subject']='Concert Alerts for ' + calendar.month_name[startMonth] + '-' + calendar.month_name[endMonth] + ' ' + str(year)
     message['From']='ConcertFinder'
     message['To']=','.join(to)
     return message
@@ -59,6 +68,7 @@ def createEmailBody():
         <th style="padding: 3px; border: 2px solid #ffcc00;">Date</th>
         <th style="padding: 3px; border: 2px solid #ffcc00;">URL</th>
         <th style="padding: 3px; border: 2px solid #ffcc00;">Venue</th>
+        <th style="padding: 3px; border: 2px solid #ffcc00;">Spotify</th>
         </tr>
     </thead>
 
@@ -68,7 +78,7 @@ def createEmailBody():
 
 def sendEmail(email):
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(GMAIL_ACCOUNT, GMAIL_SECRET)
+        smtp.login(GMAIL, PASSWORD)
         smtp.send_message(email)    
 
 def shorternURL(url):
@@ -79,9 +89,9 @@ def shorternURL(url):
     return requests.get(shortUrl).text
 
 def kregFlix():
-    account = MyPlexAccount(PLEX_USER, PLEX_PW)
+    account = MyPlexAccount(PLEX_USER, PLEX_PASSWORD)
     plex = account.resource(PLEX_SERVER).connect()
-    music = plex.library.section(PLEX_LIBRARY)
+    music = plex.library.section(MUSIC_LIBRARY)
     kregflixMusic = music.search()
     kregflixArtists = []
 
@@ -90,45 +100,69 @@ def kregFlix():
 
     return kregflixArtists
 
-client = Client(BANDSINTOWN_ID)
+def getSpotifyLink(artist):
+    uri = sp.search(q=artist, type='artist')['artists']['items'][0]['uri']
+    spotifyURL = sp.artist(uri)['external_urls']['spotify']
+    return spotifyURL
+
+def parseEventDate(eventDate):
+    yearMonthDay = eventDate.split('-')
+    year = int(yearMonthDay[0])
+    month = int(yearMonthDay[1])
+    day = int(yearMonthDay[2].split('T')[0])
+    parsedEventDate = date(year, month, day)
+
+    return parsedEventDate
 
 def getConcerts(locations, startDate, endDate, body, eventCount):
     for artist in kregflixArtists:
-        for location in locations:
-            events = client.artists_events(artist, date=startDate + ',' + endDate)
-            for event in events:
-                city = ''
-                state = ''
-                eventTime = ''
-                url = ''
-                venue = ''
-                if('venue' in event):
-                    if(event.get('venue').get('country') == 'United States'):
-                        city =  event.get('venue').get('city').lower()
-                        state =  event.get('venue').get('region').lower()
-                        if(city == location.get('city') and state == location.get('state')):
-                            city = city.title()
-                            state = state.upper()
-                            venue = event.get('venue').get('name')# - venue
-                            if('offers' in event):
-                                url = event.get('offers')[0].get('url')# - ticket link
-                                shortLink = shorternURL(url)
-                            if('starts_at' in event):
-                                eventTime = datetime.strptime(event.get('starts_at'), '%Y-%m-%dT%H:%M:%S')
-                                eventTime = eventTime.strftime("%m-%d-%y %H:%M")# - event start time
-                            time.sleep(5)
-                            rowColor = '#a1b6d4' if eventCount % 2 == 0 else '#d0dbdf'
+        artistFormatted = artist.replace(' ','-')
+        url = f'https://api.seatgeek.com/2/events?per_page=100&performers.slug='+artistFormatted
+        response = get(url=url, params=params)
+        #dont really wanna fight with how seatgeek handles random special characters that might be in names
+        try:
+            events = response.json()['events']
+        except:
+            pass
 
-                            body += '''
-                                    <tr>
-                                        <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + artist + '''</td>
-                                        <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + city + '''</td>
-                                        <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + state + '''</td>
-                                        <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + eventTime +'''</td>
-                                        <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + shortLink +'''</td>
-                                        <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + venue +'''</td>
-                            '''
-                            eventCount = eventCount + 1
+        for event in events:
+            city = ''
+            state = ''
+            eventTime = ''
+            url = ''
+            venue = ''
+            spotify = ''
+            if('venue' in event):
+                if(event['venue']['country'] == 'US'):
+                    city =  event['venue']['city'].lower()
+                    state =  event['venue']['state'].lower()
+                    if(any(tempDict['city'] == city for tempDict in locations)):
+                        for location in locations:
+                            if(city == location['city'] and state == location['state']):
+                                city = city.title()
+                                state = state.upper()
+                                venue = event['venue']['name']
+                                url =  event['venue']['url']# - ticket link
+                                shortLink = shorternURL(url)
+                                spotify = shorternURL(getSpotifyLink(artist))
+                                eventTime = datetime.strptime(event['datetime_local'], '%Y-%m-%dT%H:%M:%S')
+                                parsedEventDate = parseEventDate(event['datetime_local'])
+                                formattedEventTime = eventTime.strftime("%m-%d-%y %H:%M")# - event start time
+                                time.sleep(.25)
+                                if(startDate <= parsedEventDate <= endDate):
+                                    rowColor = '#a1b6d4' if eventCount % 2 == 0 else '#d0dbdf'
+
+                                    body += '''
+                                            <tr>
+                                                <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + artist + '''</td>
+                                                <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + city + '''</td>
+                                                <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + state + '''</td>
+                                                <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + formattedEventTime +'''</td>
+                                                <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + shortLink +'''</td>
+                                                <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + venue +'''</td>
+                                                <td style="padding: 3px; background-color:''' + rowColor + ''';">''' + spotify +'''</td>
+                                    '''
+                                    eventCount = eventCount + 1
     return body
 
 
@@ -138,6 +172,11 @@ locations = [{'city' : 'pittsburgh', 'state' : 'pa'},
              {'city' : 'millvale', 'state' : 'pa'},
              {'city' : 'coraopolis', 'state' : 'pa'},
              {'city' : 'warrendale', 'state' : 'pa'},
+             {'city' : 'burgettstown', 'state' : 'pa'},
+             {'city' : 'erie', 'state' : 'pa'},
+             {'city' : 'moon twp', 'state' : 'pa'},
+             {'city':  'cuyahoga falls', 'state': 'oh'},
+             {'city':  'lakewood', 'state': 'oh'},
              {'city' : 'cleveland', 'state' : 'oh'}]
 
 startDate, endDate  = calculateDates()
